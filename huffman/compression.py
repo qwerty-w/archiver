@@ -1,12 +1,6 @@
 import time
-
-from bitstring import ConstBitStream, BitArray as _BitArray
 import typing
-
-
-class BitArray(_BitArray):
-    def __hash__(self):
-        return hash(self.bin)
+from huffman import BitArray, ConstBitStream
 
 
 class InnerNode:  # PlaceHolder
@@ -33,10 +27,10 @@ class Wrapper:
         self.node = node
         self.state = self.LEFT
 
-    def next_left(self):
+    def next_left(self) -> bool:
         return self.state == self.LEFT
 
-    def next_right(self):
+    def next_right(self) -> bool:
         return self.state == self.RIGHT
 
     def __repr__(self):
@@ -89,7 +83,7 @@ class Decoder:
     def __iter__(self):
         return self.decode()
 
-    def decode(self, segment_size: int = 64) -> typing.Iterator:
+    def decode(self, segment_size: int = 64) -> typing.Iterator[bytes]:
         return _DecodeIterator(self, segment_size)
 
 
@@ -116,6 +110,19 @@ class Encoder:  # HuffmanCoding
                 i2 = i
 
         return nodes.pop(i1), nodes.pop(i2 - 1 if i2 > i1 else i2)
+
+    def get_encoded_size(self) -> int:
+        stack, size = [self.root], 0
+
+        while stack:
+            node = stack.pop()
+
+            if not isinstance(node.value, InnerNode):
+                size += node.freq * len(self.encoding[node.value])
+
+            stack.extend(filter(None, [node.right, node.left]))
+
+        return size // 8 + (size % 8 > 0)
 
     def build_tree(self) -> Node:
         freq = {}
@@ -167,21 +174,21 @@ class Encoder:  # HuffmanCoding
 
         return encoding
 
-    def encode(self) -> bytes:  # todo: refactor me please
+    def encode(self) -> typing.Generator[bytes, None, None]:
         rv = BitArray()
 
         while self.stream.pos < self.stream.length:
-            byte = self.stream.read('bytes1')
-            rv += self.encoding[byte]
-
             if rv.length >= 8:
                 b, rv = rv[:8].tobytes(), rv[8:]
                 yield b
 
-        self._encoded_offset = 8 - rv.length
+            byte = self.stream.read('bytes1')
+            rv += self.encoding[byte]
+
+        self._encoded_offset = 8 - rv.length % 8 if rv.length % 8 else 0
         yield rv.tobytes()
 
-    def get_encoded_offset(self):
+    def get_encoded_offset(self) -> int:
         if self._encoded_offset:
             return self._encoded_offset
 
@@ -192,52 +199,6 @@ def time_wrap(func, *args, _round: int = 2):
     t0 = time.time()
     rv = func(*args)
     return int((time.time() - t0) * 10 ** _round) / 10 ** _round, rv
-
-
-def filetest():
-    # stream = ConstBitStream(filename='test')
-    # encoder = Encoder(stream)
-    #
-    # with open('test_compressed', 'wb') as f:
-    #     for b in encoder.encode():
-    #         b: bytes
-    #         f.write(b)
-    #
-    # print(sorted(encoder.encoding.items(), key=lambda x: x[1].length))
-    # print(encoder.get_encoded_offset())
-
-    encoding = dict([(b't', BitArray('0b000')), (b' ', BitArray('0b110')), (b'y', BitArray('0x4')), (b'e', BitArray('0x5')),
-     (b'r', BitArray('0x7')), (b'a', BitArray('0x8')), (b'h', BitArray('0xb')), (b'w', BitArray('0b00110')),
-     (b'o', BitArray('0b00111')), (b'd', BitArray('0b01101')), (b'\r', BitArray('0b10011')),
-     (b'\n', BitArray('0b10100')), (b'i', BitArray('0b10101')), (b's', BitArray('0b11101')),
-     (b'n', BitArray('0b11110')), (b',', BitArray('0b001001')), (b'u', BitArray('0b001010')),
-     (b'l', BitArray('0b011000')), (b'g', BitArray('0b100100')), (b'?', BitArray('0b100101')),
-     (b'f', BitArray('0b111001')), (b'm', BitArray('0b111110')), (b'p', BitArray('0b0010111')),
-     (b'W', BitArray('0b1110000')), (b'b', BitArray('0b1111110')), (b'C', BitArray('0x20')), (b'&', BitArray('0x21')),
-     (b'v', BitArray('0x22')), (b':', BitArray('0x23')), (b'k', BitArray('0x65')), (b'.', BitArray('0x66')),
-     (b'A', BitArray('0x67')), (b'c', BitArray('0xe2')), (b'T', BitArray('0xe3')), (b'I', BitArray('0xfe')),
-     (b'D', BitArray('0xff')), (b';', BitArray('0b001011000')), (b'B', BitArray('0b001011001')),
-     (b'O', BitArray('0b001011010')), (b'z', BitArray('0b001011011')), (b"'", BitArray('0b011001000')),
-     (b'L', BitArray('0b011001001'))])
-    offset = 3
-
-    stream = ConstBitStream(filename='test_compressed')
-    decoder = Decoder(encoding, stream, stream.length - offset)
-
-    with open('original_test', 'wb') as f:
-        for b in decoder.decode():
-            f.write(b)
-
-    import hashlib
-    with open('test', 'rb') as f:
-        h1 = hashlib.sha256(f.read()).hexdigest()
-
-    with open('original_test', 'rb') as f:
-        h2 = hashlib.sha256(f.read()).hexdigest()
-
-    print('\n'.join([h1, h2]))
-    print(h1 == h2)
-    assert h1 == h2
 
 
 def main():
@@ -270,4 +231,4 @@ def main():
 
 
 if __name__ == '__main__':
-    filetest()
+    main()
