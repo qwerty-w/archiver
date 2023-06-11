@@ -1,4 +1,4 @@
-from bitstring import ConstBitStream, BitArray as _BitArray
+from bitstring import BitStream, ConstBitStream, BitArray as _BitArray
 
 
 class BitArray(_BitArray):
