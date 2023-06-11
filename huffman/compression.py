@@ -58,6 +58,9 @@ class Encoding:
         self.table = table
         self.max_code_length = max_code_length if max_code_length is not None else self.get_max_code_length()
 
+    def __eq__(self, other):
+        return self.table == other.table if isinstance(other, Encoding) else self.table == other
+
     def get_max_code_length(self) -> int:
         return max(map(len, self.table.values()))
 
