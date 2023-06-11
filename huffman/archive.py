@@ -1,8 +1,8 @@
 import os
 import typing
 import tempfile
-from bitstring import ConstBitStream
 from huffman import compression
+from bitstring import ConstBitStream
 
 # union few files
 # 2-methods support
