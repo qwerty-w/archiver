@@ -1,6 +1,7 @@
 import time
 import typing
-from huffman import BitArray, ConstBitStream
+from functools import partial
+from huffman import BitArray, BitStream, ConstBitStream
 
 
 class InnerNode:  # PlaceHolder
@@ -40,59 +41,85 @@ class Wrapper:
         return f'{self.node}:{self.state}'
 
 
-class _DecodeIterator:
-    def __init__(self, encoded: 'Decoder', segment_size: int):
-        self.encoded = encoded
-        self.segment_size = segment_size
+# noinspection PyArgumentList
+class Encoding:
+    """
+    <>
+    """
+    def __init__(self, table: dict[bytes, BitArray], max_code_length: int = None):
+        self.table = table
+        self.max_code_length = max_code_length if max_code_length is not None else self.get_max_code_length()
 
-        self.table = dict(zip(self.encoded.encoding.values(), self.encoded.encoding.keys()))
-        self.lb = self.encoded.stream.pos + self.encoded.bit_length
-        self.code = BitArray()
+    def get_max_code_length(self) -> int:
+        return sum(map(len, self.table.values()))
 
-    def __iter__(self):
-        return self
+    def get_reversed_table(self) -> dict[BitArray, bytes]:
+        return dict(zip(self.table.values(), self.table.keys()))
 
-    def __next__(self) -> bytes:
-        if self.encoded.stream.pos + self.segment_size > self.lb:  # todo: check
-            size = self.lb - self.encoded.stream.pos
+    # <FULL encoding size:2> <max bits length:1(7 for example)> <0111 1001001>
+    #                                                            size  value
+    def pack(self) -> bytes:
+        code_length_size = (self.max_code_length - 1).bit_length()
 
-        else:
-            size = self.segment_size
+        if code_length_size >= 256:
+            raise ValueError('max code length is too big')
 
-        if size <= 0:
-            raise StopIteration
+        barray = BitArray()
+        for byte, bits in self.table.items():
+            code_length = len(bits) - 1
 
-        rv = b''
-        for bit in self.encoded.stream.read(f'bin{size}'):
-            self.code += '0b' + bit
+            if code_length < 0:
+                raise ValueError(f'code for byte {byte} is empty')
 
-            if self.code in self.table:
-                rv += self.table[self.code]
-                self.code.clear()
+            for val in [
+                '0x' + byte.hex(),
+                '0b' + '0' * (code_length_size - code_length.bit_length()) + bin(code_length)[2:],
+                bits
+            ]: barray.append(val)
 
-        return rv
+        rv = barray.tobytes()
 
+        if len(rv) >= 256 ** 2:
+            raise ValueError('encoding is too big')
 
-class Decoder:
-    def __init__(self, encoding: dict[bytes, BitArray], stream: ConstBitStream, bit_length: int):
-        self.encoding = encoding
-        self.stream = stream
-        self.bit_length = bit_length
-        self.segment_size = 64  # bit
+        return b''.join((
+            len(rv).to_bytes(2),
+            code_length_size.to_bytes(1),
+            rv
+        ))
 
-    def __iter__(self):
-        return self.decode()
+    @staticmethod
+    def _fill_bitstream(to_read: typing.BinaryIO, to_write: BitStream, end: int, required_bit_size: int):
+        while len(to_write) - to_write.pos < required_bit_size and to_read.tell() < end and (read := to_read.read(1)):
+            to_write += read
 
-    def decode(self, segment_size: int = 64) -> typing.Iterator[bytes]:
-        return _DecodeIterator(self, segment_size)
+    @classmethod
+    def unpack(cls, stream: typing.BinaryIO) -> 'Encoding':
+        encoding_size = int.from_bytes(stream.read(2))
+        code_length_size = int.from_bytes(stream.read(1))
+
+        data, table = BitStream(), {}
+        index, end = 0, stream.tell() + encoding_size
+        fill = partial(cls._fill_bitstream, stream, data, end)
+        while stream.tell() < end:
+            fill(8)
+            byte = data.read('bytes1')
+            fill(code_length_size)
+            code_length = data.read(f'uint{code_length_size}') + 1
+            fill(code_length)
+            table[byte] = BitArray(data.read(f'bits{code_length}'))
+
+        return cls(table)
+
+    def __reversed__(self):
+        return self.get_reversed_table()
 
 
 class Encoder:  # HuffmanCoding
     def __init__(self, stream: ConstBitStream):
         self.stream = stream
         self.root = self.build_tree()
-        self.encoding = self.get_encoding()
-        self._encoded_offset = None
+        self.encoding, self.encoded_size, self.encoded_offset = self._get_encs()
 
     @staticmethod
     def _pop2smallest(nodes: list[Node]) -> tuple[Node, Node]:
@@ -110,19 +137,6 @@ class Encoder:  # HuffmanCoding
                 i2 = i
 
         return nodes.pop(i1), nodes.pop(i2 - 1 if i2 > i1 else i2)
-
-    def get_encoded_size(self) -> int:
-        stack, size = [self.root], 0
-
-        while stack:
-            node = stack.pop()
-
-            if not isinstance(node.value, InnerNode):
-                size += node.freq * len(self.encoding[node.value])
-
-            stack.extend(filter(None, [node.right, node.left]))
-
-        return size // 8 + (size % 8 > 0)
 
     def build_tree(self) -> Node:
         freq = {}
@@ -145,11 +159,12 @@ class Encoder:  # HuffmanCoding
         root = nodes.pop()
         return root
 
-    def get_encoding(self) -> dict[bytes, BitArray]:
+    def _get_encs(self) -> tuple[Encoding, int, int]:
         encoding = {}
 
         stack = [Wrapper(self.root)]
         code = BitArray()
+        max_code_length = bit_size = 0
         while stack:
             wrapper = stack[-1]
             current = wrapper.node
@@ -169,30 +184,54 @@ class Encoder:  # HuffmanCoding
 
                 if not isinstance(n.value, InnerNode):
                     encoding[n.value] = code
+                    bit_size += len(code) * n.freq
+                    if len(code) > max_code_length:
+                        max_code_length = len(code)
 
                 code = code[:-1]
 
-        return encoding
+        remainder = bit_size % 8
+        return (Encoding(encoding, max_code_length),
+                bit_size // 8 + (remainder > 0),
+                8 - remainder if remainder else 0)
 
     def encode(self) -> typing.Generator[bytes, None, None]:
-        rv = BitArray()
+        yv = BitArray()
 
         while self.stream.pos < self.stream.length:
-            if rv.length >= 8:
-                b, rv = rv[:8].tobytes(), rv[8:]
+            if yv.length >= 8:
+                b, yv = yv[:8].tobytes(), yv[8:]
                 yield b
 
             byte = self.stream.read('bytes1')
-            rv += self.encoding[byte]
+            yv += self.encoding.table[byte]
 
-        self._encoded_offset = 8 - rv.length % 8 if rv.length % 8 else 0
-        yield rv.tobytes()
+        yield yv.tobytes()
 
-    def get_encoded_offset(self) -> int:
-        if self._encoded_offset:
-            return self._encoded_offset
 
-        raise RuntimeError('encoded offset only can be received after .encoded')
+class Decoder:
+    def __init__(self, encoding: Encoding, stream: ConstBitStream, segment_size: int = 64):
+        self.encoding = encoding
+        self.stream = stream
+        self.segment_size = segment_size
+        self.table = self.encoding.get_reversed_table()
+
+    def __iter__(self):
+        return next(self)
+
+    def __next__(self) -> typing.Generator[bytes, None, None]:
+        code = BitArray()
+
+        for segment in self.stream.cut(self.segment_size):
+            for bit in segment.bin:
+                code += '0b' + bit
+
+                if code in self.table:
+                    yield self.table[code]
+                    code.clear()
+
+    def decode(self):
+        return iter(self)
 
 
 def time_wrap(func, *args, _round: int = 2):
@@ -202,6 +241,20 @@ def time_wrap(func, *args, _round: int = 2):
 
 
 def main():
+    # enc = Encoding({
+    #     b'\xf0': BitArray('0b10101011'),
+    #     b'\xee': BitArray('0b1010'),
+    #     b'\x24': BitArray('0b101'),
+    #     b'\x00': BitArray('0b101010'),
+    #     b'\xff': BitArray('0b001')
+    # })
+    # e = enc.pack()
+    # BitArray(e)[4 * 8:].pp()
+    # from io import BytesIO
+    # d = enc.unpack(BytesIO(e))
+    # print(d.table)
+    # return
+
     string = b'Mama mila ramu'
     print(f'String [{len(string)}]:', string, end='\n\n')
 
@@ -210,14 +263,15 @@ def main():
     encoded = b''
     for i in e.encode():
         encoded += i
-    offset = e.get_encoded_offset()
 
     # print(encoded)
 
-    e = Decoder(e.encoding, ConstBitStream(encoded), len(encoded) * 8 - offset)
+    from io import BytesIO
+    stream: ConstBitStream = ConstBitStream(BytesIO(encoded), length=e.encoded_size * 8 - e.encoded_offset)
+    d = Decoder(e.encoding, stream)
 
     decoded = b''
-    for i in e.decode():
+    for i in d.decode():
         decoded += i
 
     print(decoded)

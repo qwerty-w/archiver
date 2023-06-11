@@ -24,16 +24,15 @@ def test_file_compression():
         for byte in encoder.encode():
             f.write(byte)
 
-        offset = encoder.get_encoded_offset()
-
     with open(uncompressed_filename, 'wb') as f:
-        stream = compression.ConstBitStream(filename=compressed_filename)
-        decoder = compression.Decoder(encoder.encoding, stream, stream.length - offset)
+        stream = compression.ConstBitStream(filename=compressed_filename,
+                                            length=encoder.encoded_size * 8 - encoder.encoded_offset)
+        decoder = compression.Decoder(encoder.encoding, stream)
         for _bytes in decoder.decode():
             f.write(_bytes)
 
     hs = []
-    for fn in [TEST_FILE, uncompressed_filename]:
+    for fn in [uncompressed_filename, TEST_FILE]:
         h = hashlib.sha256()
 
         with open(fn, 'rb') as f:
