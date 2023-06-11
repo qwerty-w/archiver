@@ -1,6 +1,6 @@
+from abc import ABC
 import typing
 from functools import partial
-from abc import ABC
 from bitstring import BitStream, ConstBitStream
 
 
