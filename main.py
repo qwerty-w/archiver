@@ -47,7 +47,7 @@ class Printer:
     @staticmethod
     def create(_time: float, method: str, path: str, files_count: int, uncompressed_size: int, compressed_size: int):
         print(f'Successful create:\n'
-              f'Time - {_time}\n'
+              f'Time - {_time}s\n'
               f'Method - {method}\n'
               f'Archive path - {path}\n'
               f'Files added - {files_count}\n'
@@ -58,7 +58,7 @@ class Printer:
     @staticmethod
     def extract(_time: float, method: str, output_dir: str, total_files: int, uncompressed_size: int):
         print(f'Successful extract:\n'
-              f'Time - {_time}\n'
+              f'Time - {_time}s\n'
               f'Method - {method}\n'
               f'Output dir - {output_dir}\n'
               f'Total files - {total_files}\n'
@@ -78,7 +78,7 @@ class Printer:
     def delete(_time: float, count: int, names: list[str], indexes: list[int],
                size_before: int, size_after: int, uncompressed_size: int):
         print(f'Successful delete {count} files:\n'
-              f'Time - {_time}\n'
+              f'Time - {_time}s\n'
               f'Names to delete - {repr(names)}\n'
               f'Indexes to delete - {repr(indexes)}\n'
               f'Compressed size before/after - {size_before}/{size_after}\n'
