@@ -1,3 +1,6 @@
 __pycache__
 venv
 .idea
+tests/data/*
+!tests/data/Tyger
+!tests/data/Yesenin.txt
