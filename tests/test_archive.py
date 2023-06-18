@@ -9,7 +9,7 @@ def varint(request):
     return archive.VarInt(request.param)
 
 
-@pytest.fixture(params=[lambda vi: vi.max_value, lambda vi: 256 ** vi.size])
+@pytest.fixture(params=[lambda vi: vi.max_value, lambda vi: 256 ** vi.size - 1])
 def rand_varint(request, varint):
     return varint, random.randint(0, request.param(varint))
 
