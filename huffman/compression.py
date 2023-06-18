@@ -51,8 +51,9 @@ class Wrapper:
 # noinspection PyArgumentList
 class Encoding:
     """
-    <FULL encoding size:2> <max bits length:1> <0111 1001001> <...>
-                                                size  value
+                                              ----------- PACKED TABLE -----------
+    <packed table size:2> <max bits length:1> <0xff     0110    1001001> ... <...>
+                                               byte   size - 1   value
     """
     def __init__(self, table: dict[bytes, str], max_code_length: int = None):
         self.table = table
