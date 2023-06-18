@@ -26,7 +26,7 @@ class VarInt:  # unsigned
         return value
 
     def pack(self, integer: int) -> bytes:
-        if integer < self.max_value:
+        if integer <= self.max_value:
             return integer.to_bytes(1)
 
         length = integer.bit_length()
